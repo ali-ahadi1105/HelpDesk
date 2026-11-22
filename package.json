@@ -1,0 +1,18 @@
+{
+  "name": "taskflow",
+  "version": "1.0.0",
+  "private": true,
+  "workspaces": ["apps/*"],
+  "scripts": {
+    "dev": "concurrently -n api,web -c blue,magenta \"npm run dev -w @taskflow/api\" \"npm run dev -w @taskflow/web\"",
+    "build": "npm run build -w @taskflow/api && npm run build -w @taskflow/web",
+    "typecheck": "npm run typecheck -w @taskflow/api && npm run typecheck -w @taskflow/web",
+    "test": "npm run test -w @taskflow/api",
+    "test:e2e": "npm run test:e2e -w @taskflow/api",
+    "db:generate": "npm run db:generate -w @taskflow/api",
+    "db:migrate": "npm run db:migrate -w @taskflow/api",
+    "db:seed": "npm run db:seed -w @taskflow/api"
+  },
+  "devDependencies": {"concurrently": "^9.1.2"},
+  "engines": {"node": ">=22.0.0"}
+}
