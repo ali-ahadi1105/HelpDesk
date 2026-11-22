@@ -26,7 +26,9 @@ async function neutralizeLegacyDemoOwner(): Promise<void> {
 }
 
 async function main(): Promise<void> {
-  const email = process.env.SEED_USER_EMAIL?.trim();
+  // Match registration and login: the stored address is always trimmed and
+  // lowercased, otherwise a mixed-case seed address could never sign in.
+  const email = process.env.SEED_USER_EMAIL?.trim().toLowerCase();
   const password = process.env.SEED_USER_PASSWORD;
 
   // The demo owner is opt-in: seeding one by default would publish a known
@@ -39,23 +41,27 @@ async function main(): Promise<void> {
     return;
   }
 
-  if (email.toLowerCase() === LEGACY_DEMO_EMAIL) {
-    // The operator explicitly claimed the legacy address, so apply their password.
-    await prisma.user.update({
-      where: { email: LEGACY_DEMO_EMAIL },
-      data: { passwordHash: await hash(password, 12) },
-    });
-  } else {
+  if (email !== LEGACY_DEMO_EMAIL) {
     await neutralizeLegacyDemoOwner();
   }
 
+  const name = process.env.SEED_USER_NAME?.trim();
+  const passwordHash = await hash(password, 12);
+
+  // One upsert covers both a fresh and an existing database. Applying the
+  // operator's password on update keeps the seeded owner able to sign in with
+  // the credentials they supplied, and avoids an update against a row that may
+  // not exist yet.
   const user = await prisma.user.upsert({
     where: { email },
-    update: {},
+    update: {
+      passwordHash,
+      ...(name ? { name } : {}),
+    },
     create: {
       email,
-      name: process.env.SEED_USER_NAME ?? 'Alex Morgan',
-      passwordHash: await hash(password, 12),
+      name: name ?? 'Alex Morgan',
+      passwordHash,
     },
   });
 

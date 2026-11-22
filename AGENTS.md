@@ -10,4 +10,6 @@
 - Single-use resources (invitations, tokens) are consumed with a conditional `updateMany` and their side effect in the same transaction, so a replay cannot create a second effect.
 - Prisma schema changes require a matching migration under `apps/api/prisma/migrations`.
 - The demo seed is opt-in and needs both `SEED_USER_EMAIL` and `SEED_USER_PASSWORD`. Do not reintroduce a default email or password.
+- Seeded and registered email addresses are stored trimmed and lowercased, because `AuthService.login()` looks users up that way. Any path that writes a `User.email` must apply the same normalization.
+- The seed must be idempotent on both a fresh and an existing database. Use `upsert` rather than an `update` against a row that may not exist, and never let the seed exit non-zero on a normal startup path.
 - Do not commit credentials, local environment files, generated Prisma clients, or build output.

@@ -39,6 +39,10 @@ The seeded account receives the `OWNER` role in the `TaskFlow Demo` workspace to
 an example board. Without those variables the migration step reports that it skipped the seed
 and creates no users.
 
+The seed is idempotent: running it again on an existing database re-applies the password you
+supplied instead of failing. The address is normalized to lowercase, exactly as registration
+does, so the seeded owner can sign in with the same address you provided.
+
 ## Run without Docker
 
 Requirements: Node.js 22+, PostgreSQL, and Redis.
