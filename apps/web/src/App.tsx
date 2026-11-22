@@ -1,11 +1,12 @@
 import { useQuery } from '@tanstack/react-query';
 import { LoaderCircle } from 'lucide-react';
-import { Navigate, Outlet, Route, Routes, useParams } from 'react-router-dom';
+import { Navigate, Outlet, Route, Routes, useLocation, useParams } from 'react-router-dom';
 import { AppShell } from './components/AppShell';
 import { useAuth } from './contexts/AuthContext';
 import { api } from './lib/api';
 import { AuthPage } from './pages/AuthPage';
 import { DashboardPage } from './pages/DashboardPage';
+import { InvitationPage } from './pages/InvitationPage';
 import { ProjectBoardPage } from './pages/ProjectBoardPage';
 import { ProjectsPage } from './pages/ProjectsPage';
 import { WorkspaceSettingsPage } from './pages/WorkspaceSettingsPage';
@@ -14,10 +15,12 @@ import type { Workspace } from './types';
 
 function ProtectedRoute() {
   const { user, loading } = useAuth();
+  const location = useLocation();
   if (loading) {
     return <div className="full-page-loader"><LoaderCircle className="spin" size={28} /> Loading TaskFlow…</div>;
   }
-  return user ? <Outlet /> : <Navigate to="/login" replace />;
+  if (user) return <Outlet />;
+  return <Navigate to="/login" replace state={{ from: `${location.pathname}${location.search}` }} />;
 }
 
 function WorkspaceLayout() {
@@ -47,6 +50,7 @@ export function App() {
       <Route path="/login" element={<AuthPage />} />
       <Route element={<ProtectedRoute />}>
         <Route path="/workspaces" element={<WorkspacesPage />} />
+        <Route path="/invitations/:token" element={<InvitationPage />} />
         <Route path="/workspaces/:workspaceId" element={<WorkspaceLayout />}>
           <Route index element={<Navigate to="dashboard" replace />} />
           <Route path="dashboard" element={<DashboardPage />} />

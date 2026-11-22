@@ -1,9 +1,13 @@
 import { useState, type FormEvent } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { LoaderCircle, MailPlus, ShieldCheck, UserPlus } from 'lucide-react';
+import { Copy, LoaderCircle, MailPlus, ShieldCheck, UserPlus } from 'lucide-react';
 import { useParams } from 'react-router-dom';
 import { api, ApiError } from '../lib/api';
-import type { Role, WorkspaceDetails } from '../types';
+import type { Invitation, Role, WorkspaceDetails } from '../types';
+
+function invitationLink(token: string): string {
+  return `${window.location.origin}/invitations/${token}`;
+}
 
 export function WorkspaceSettingsPage() {
   const { workspaceId } = useParams();
@@ -12,6 +16,7 @@ export function WorkspaceSettingsPage() {
   const [role, setRole] = useState<Role>('MEMBER');
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
+  const [inviteLink, setInviteLink] = useState('');
 
   const workspace = useQuery({
     queryKey: ['workspace', workspaceId],
@@ -19,10 +24,12 @@ export function WorkspaceSettingsPage() {
   });
 
   const invite = useMutation({
-    mutationFn: () => api.post(`/workspaces/${workspaceId}/invitations`, { email, role }),
-    onSuccess: () => {
+    mutationFn: () =>
+      api.post<Invitation>(`/workspaces/${workspaceId}/invitations`, { email, role }),
+    onSuccess: (created) => {
       setEmail('');
-      setMessage('Invitation created. Share it with your teammate.');
+      setInviteLink(invitationLink(created.token));
+      setMessage('Invitation created. Share the link with your teammate.');
       setError('');
     },
     onError: (caught) => {
@@ -123,6 +130,19 @@ export function WorkspaceSettingsPage() {
           </form>
           {message && <div className="alert alert--success">{message}</div>}
           {error && <div className="alert alert--error">{error}</div>}
+          {inviteLink && (
+            <div className="invite-link">
+              <span className="muted">Invitation link</span>
+              <code>{inviteLink}</code>
+              <button
+                type="button"
+                className="button button--ghost"
+                onClick={() => void navigator.clipboard.writeText(inviteLink)}
+              >
+                <Copy size={16} /> Copy
+              </button>
+            </div>
+          )}
         </section>
       )}
     </main>

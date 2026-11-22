@@ -131,6 +131,161 @@ describe('TaskFlow API (e2e)', () => {
       .expect(400);
   });
 
+  it('rejects a task created with another workspace project and column', async () => {
+    const attackSession = await register({
+      name: owner.name,
+      email: `isolation-attacker-${suffix}@taskflow.local`,
+      password: owner.password,
+    });
+    const victimSession = await register({
+      name: owner.name,
+      email: `isolation-victim-${suffix}@taskflow.local`,
+      password: owner.password,
+    });
+
+    const attackerWorkspace = await request(app.getHttpServer())
+      .post('/workspaces')
+      .set('Authorization', `Bearer ${attackSession.accessToken}`)
+      .send({ name: 'E2E Attacker Workspace' })
+      .expect(201);
+    const victimWorkspace = await request(app.getHttpServer())
+      .post('/workspaces')
+      .set('Authorization', `Bearer ${victimSession.accessToken}`)
+      .send({ name: 'E2E Victim Workspace' })
+      .expect(201);
+
+    const victimProject = await request(app.getHttpServer())
+      .post(`/workspaces/${victimWorkspace.body.id}/projects`)
+      .set('Authorization', `Bearer ${victimSession.accessToken}`)
+      .send({ name: 'E2E Victim Project' })
+      .expect(201);
+    const victimColumn = (victimProject.body.columns as { id: string; status: string }[]).find(
+      (column) => column.status === 'TODO',
+    );
+
+    // The attacker is a valid member of their own workspace and submits the
+    // victim's project and column IDs under their own workspace URL.
+    await request(app.getHttpServer())
+      .post(`/workspaces/${attackerWorkspace.body.id}/projects/${victimProject.body.id}/tasks`)
+      .set('Authorization', `Bearer ${attackSession.accessToken}`)
+      .send({ title: 'Injected task', columnId: victimColumn!.id })
+      .expect(404);
+
+    const victimBoard = await request(app.getHttpServer())
+      .get(`/workspaces/${victimWorkspace.body.id}/projects/${victimProject.body.id}`)
+      .set('Authorization', `Bearer ${victimSession.accessToken}`)
+      .expect(200);
+    const injected = (victimBoard.body.columns as { tasks: { title: string }[] }[])
+      .flatMap((column) => column.tasks)
+      .find((candidate) => candidate.title === 'Injected task');
+    expect(injected).toBeUndefined();
+  });
+
+  it('rejects a concurrent reuse of the same refresh token', async () => {
+    const session = await register({
+      name: owner.name,
+      email: `refresh-race-${suffix}@taskflow.local`,
+      password: owner.password,
+    });
+
+    const attempts = await Promise.all(
+      Array.from({ length: 5 }, () =>
+        request(app.getHttpServer())
+          .post('/auth/refresh')
+          .set('Cookie', session.refreshCookie)
+          .then((response) => response.status),
+      ),
+    );
+
+    expect(attempts.filter((status) => status === 200)).toHaveLength(1);
+    expect(attempts.filter((status) => status === 401)).toHaveLength(4);
+  });
+
+  it('lets an invited user accept an invitation and join the workspace', async () => {
+    const inviterSession = await register({
+      name: owner.name,
+      email: `invite-owner-${suffix}@taskflow.local`,
+      password: owner.password,
+    });
+    const inviteeEmail = `invitee-${suffix}@taskflow.local`;
+    const inviteeSession = await register({
+      name: 'E2E Invitee',
+      email: inviteeEmail,
+      password: owner.password,
+    });
+
+    const workspace = await request(app.getHttpServer())
+      .post('/workspaces')
+      .set('Authorization', `Bearer ${inviterSession.accessToken}`)
+      .send({ name: 'E2E Invitation Workspace' })
+      .expect(201);
+    const workspaceId = workspace.body.id as string;
+
+    const invitation = await request(app.getHttpServer())
+      .post(`/workspaces/${workspaceId}/invitations`)
+      .set('Authorization', `Bearer ${inviterSession.accessToken}`)
+      .send({ email: inviteeEmail, role: 'MEMBER' })
+      .expect(201);
+    expect(invitation.body.token).toBeTruthy();
+
+    // Before accepting, the invitee still has no access to the workspace.
+    await request(app.getHttpServer())
+      .get(`/workspaces/${workspaceId}`)
+      .set('Authorization', `Bearer ${inviteeSession.accessToken}`)
+      .expect(403);
+
+    const accepted = await request(app.getHttpServer())
+      .post('/workspaces/invitations/accept')
+      .set('Authorization', `Bearer ${inviteeSession.accessToken}`)
+      .send({ token: invitation.body.token })
+      .expect(201);
+    expect(accepted.body.workspaceId).toBe(workspaceId);
+    expect(accepted.body.role).toBe('MEMBER');
+
+    await request(app.getHttpServer())
+      .get(`/workspaces/${workspaceId}`)
+      .set('Authorization', `Bearer ${inviteeSession.accessToken}`)
+      .expect(200);
+
+    // The invitation token is single use.
+    await request(app.getHttpServer())
+      .post('/workspaces/invitations/accept')
+      .set('Authorization', `Bearer ${inviteeSession.accessToken}`)
+      .send({ token: invitation.body.token })
+      .expect(404);
+  });
+
+  it('refuses an invitation issued to a different email address', async () => {
+    const inviterSession = await register({
+      name: owner.name,
+      email: `invite-mismatch-owner-${suffix}@taskflow.local`,
+      password: owner.password,
+    });
+    const otherSession = await register({
+      name: 'E2E Other User',
+      email: `other-${suffix}@taskflow.local`,
+      password: owner.password,
+    });
+
+    const workspace = await request(app.getHttpServer())
+      .post('/workspaces')
+      .set('Authorization', `Bearer ${inviterSession.accessToken}`)
+      .send({ name: 'E2E Mismatch Workspace' })
+      .expect(201);
+
+    const invitation = await request(app.getHttpServer())
+      .post(`/workspaces/${workspace.body.id}/invitations`)
+      .set('Authorization', `Bearer ${inviterSession.accessToken}`)
+      .send({ email: `intended-${suffix}@taskflow.local`, role: 'MEMBER' })
+      .expect(201);
+
+    await request(app.getHttpServer())
+      .post('/workspaces/invitations/accept')
+      .set('Authorization', `Bearer ${otherSession.accessToken}`)
+      .send({ token: invitation.body.token })
+      .expect(403);
+  });
+
   it('creates a board and manages tasks within the workspace', async () => {
     const session = await register({
       name: owner.name,

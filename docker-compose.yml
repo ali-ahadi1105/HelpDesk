@@ -32,6 +32,9 @@ services:
       dockerfile: apps/api/Dockerfile
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER:-taskflow}:${POSTGRES_PASSWORD:-taskflow}@postgres:5432/${POSTGRES_DB:-taskflow}?schema=public
+      SEED_USER_EMAIL: ${SEED_USER_EMAIL:-}
+      SEED_USER_PASSWORD: ${SEED_USER_PASSWORD:-}
+      SEED_USER_NAME: ${SEED_USER_NAME:-}
     command: ["sh", "-c", "npx prisma migrate deploy && npm run db:seed"]
     depends_on:
       postgres:

@@ -6,8 +6,9 @@ import { AuthService } from './auth.service';
 
 describe('AuthService', () => {
   const prisma = {
-    user: { findUnique: jest.fn(), create: jest.fn() },
-    refreshToken: { findUnique: jest.fn(), create: jest.fn(), update: jest.fn(), updateMany: jest.fn() },
+    user: { findUnique: jest.fn(), findFirst: jest.fn(), create: jest.fn() },
+    refreshToken: { create: jest.fn(), updateMany: jest.fn() },
+    $transaction: jest.fn(),
   };
   const jwtService = { signAsync: jest.fn() };
   const configValues: Record<string, string> = {
@@ -64,12 +65,69 @@ describe('AuthService', () => {
   });
 
   it('rejects an expired or revoked refresh token', async () => {
-    prisma.refreshToken.findUnique.mockResolvedValue({
-      id: 'token-id',
-      revokedAt: new Date(),
-      expiresAt: new Date(Date.now() + 1000),
+    prisma.user.findFirst.mockResolvedValue({
+      id: 'user-id',
+      email: 'alex@example.com',
+      name: 'Alex',
     });
+    prisma.$transaction.mockImplementation(
+      async (callback: (tx: unknown) => Promise<unknown>) =>
+        callback({
+          refreshToken: {
+            updateMany: jest.fn().mockResolvedValue({ count: 0 }),
+            create: jest.fn(),
+          },
+        }),
+    );
 
     await expect(service.refresh('invalid-refresh-token')).rejects.toBeInstanceOf(UnauthorizedException);
+    expect(prisma.refreshToken.create).not.toHaveBeenCalled();
+  });
+
+  it('rejects a refresh token when the claim does not match exactly one row', async () => {
+    prisma.user.findFirst.mockResolvedValue({
+      id: 'user-id',
+      email: 'alex@example.com',
+      name: 'Alex',
+    });
+    const create = jest.fn();
+    prisma.$transaction.mockImplementation(
+      async (callback: (tx: unknown) => Promise<unknown>) =>
+        callback({
+          refreshToken: {
+            updateMany: jest.fn().mockResolvedValue({ count: 0 }),
+            create,
+          },
+        }),
+    );
+
+    await expect(service.refresh('reused-refresh-token')).rejects.toBeInstanceOf(UnauthorizedException);
+    expect(create).not.toHaveBeenCalled();
+  });
+
+  it('claims a refresh token once and stores the replacement', async () => {
+    const user = {
+      id: 'user-id',
+      email: 'alex@example.com',
+      name: 'Alex',
+    };
+    prisma.user.findFirst.mockResolvedValue(user);
+    const updateMany = jest.fn().mockResolvedValue({ count: 1 });
+    const create = jest.fn().mockResolvedValue({});
+    prisma.$transaction.mockImplementation(
+      async (callback: (tx: unknown) => Promise<unknown>) =>
+        callback({ refreshToken: { updateMany, create } }),
+    );
+    jwtService.signAsync.mockResolvedValueOnce('access-token').mockResolvedValueOnce('refresh-token');
+
+    const result = await service.refresh('valid-refresh-token');
+
+    expect(result.accessToken).toBe('access-token');
+    expect(updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ revokedAt: null }),
+      }),
+    );
+    expect(create).toHaveBeenCalledTimes(1);
   });
 });

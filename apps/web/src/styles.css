@@ -207,6 +207,9 @@ input:focus, textarea:focus, select:focus { border-color: #9a8fff; box-shadow: 0
 .invite-form label svg { position: absolute; left: 11px; bottom: 11px; color: #9ba2b2; }
 .invite-form input { padding-left: 37px; }
 .invite-form select { height: 43px; }
+.invite-link { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 12px; margin-top: 14px; padding: 12px 14px; background: #f7f7fb; border: 1px solid var(--line); border-radius: 11px; }
+.invite-link code { overflow-wrap: anywhere; color: #4f566a; font-size: 0.8rem; }
+.invite-link .button { min-height: 36px; padding: 0 13px; font-size: 0.82rem; }
 
 @media (max-width: 1050px) {
   .metric-grid { grid-template-columns: repeat(2, 1fr); }

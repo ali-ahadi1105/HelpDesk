@@ -28,12 +28,16 @@ docker compose up --build
 
 The web application is available at <http://localhost:8080>, the API at <http://localhost:3000>, and Swagger documentation at <http://localhost:8080/api/docs> through the frontend proxy.
 
-The seed command creates an optional demo account when no project with the demo name exists:
+The demo seed is opt-in and never runs by default, so a deployment never ships a known
+credential. To create a demo owner, set both variables before starting the stack:
 
-- Email: `demo@taskflow.local`
-- Password: `DemoPass123!`
+```bash
+SEED_USER_EMAIL=you@example.com SEED_USER_PASSWORD='a-strong-password' docker compose up --build
+```
 
-Change or remove the seed credentials before using the stack outside local development.
+The seeded account receives the `OWNER` role in the `TaskFlow Demo` workspace together with
+an example board. Without those variables the migration step reports that it skipped the seed
+and creates no users.
 
 ## Run without Docker
 
@@ -44,7 +48,7 @@ npm install
 cp .env.example .env
 npm run db:generate
 npm run db:migrate
-npm run db:seed
+npm run db:seed   # optional: only seeds when SEED_USER_EMAIL and SEED_USER_PASSWORD are set
 npm run dev
 ```
 

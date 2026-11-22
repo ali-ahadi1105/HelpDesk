@@ -85,7 +85,53 @@ export class WorkspacesService {
         expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
       },
     });
-    return { id: invite.id, email: invite.email, role: invite.role, expiresAt: invite.expiresAt };
+    return {
+      id: invite.id,
+      email: invite.email,
+      role: invite.role,
+      token: invite.token,
+      expiresAt: invite.expiresAt,
+    };
+  }
+
+  async acceptInvitation(token: string, userId: string, userEmail: string) {
+    const invite = await this.prisma.workspaceInvite.findUnique({
+      where: { token },
+    });
+    if (!invite || invite.acceptedAt || invite.expiresAt <= new Date()) {
+      throw new NotFoundException('Invitation is invalid or expired');
+    }
+    if (invite.email.trim().toLowerCase() !== userEmail.trim().toLowerCase()) {
+      throw new ForbiddenException('This invitation was issued to a different email address');
+    }
+
+    return this.prisma.$transaction(async (tx) => {
+      const membership = await tx.membership.findUnique({
+        where: { workspaceId_userId: { workspaceId: invite.workspaceId, userId } },
+      });
+      if (membership) {
+        throw new ConflictException('You are already a member of this workspace');
+      }
+
+      // Mark the invitation consumed with a conditional update so a replayed
+      // token cannot create a second membership.
+      const consumed = await tx.workspaceInvite.updateMany({
+        where: { id: invite.id, acceptedAt: null, expiresAt: { gt: new Date() } },
+        data: { acceptedAt: new Date() },
+      });
+      if (consumed.count !== 1) {
+        throw new ConflictException('Invitation has already been accepted');
+      }
+
+      const created = await tx.membership.create({
+        data: { workspaceId: invite.workspaceId, userId, role: invite.role },
+      });
+      return {
+        membershipId: created.id,
+        workspaceId: invite.workspaceId,
+        role: created.role,
+      };
+    });
   }
 
   async updateMemberRole(workspaceId: string, memberId: string, role: Role): Promise<void> {

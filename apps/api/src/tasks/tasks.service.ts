@@ -15,6 +15,7 @@ export class TasksService {
   ) {}
 
   async create(workspaceId: string, projectId: string, userId: string, dto: CreateTaskDto) {
+    await this.assertProjectInWorkspace(workspaceId, projectId);
     const column = await this.prisma.boardColumn.findFirst({
       where: { id: dto.columnId, projectId },
     });
@@ -201,6 +202,16 @@ export class TasksService {
     });
     if (!task) throw new NotFoundException('Task was not found');
     return task;
+  }
+
+  private async assertProjectInWorkspace(workspaceId: string, projectId: string): Promise<void> {
+    const project = await this.prisma.project.findFirst({
+      where: { id: projectId, workspaceId },
+      select: { id: true },
+    });
+    if (!project) {
+      throw new NotFoundException('Project was not found');
+    }
   }
 
   private async assertWorkspaceMember(workspaceId: string, userId: string): Promise<void> {

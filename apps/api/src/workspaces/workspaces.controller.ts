@@ -4,6 +4,7 @@ import { Role } from '@prisma/client';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { WorkspaceRoles } from '../common/decorators/workspace-roles.decorator';
 import { AuthUser } from '../common/types/authenticated-request';
+import { AcceptInvitationDto } from './dto/accept-invitation.dto';
 import { CreateWorkspaceDto } from './dto/create-workspace.dto';
 import { InviteMemberDto } from './dto/invite-member.dto';
 import { UpdateMemberRoleDto } from './dto/update-member-role.dto';
@@ -43,6 +44,12 @@ export class WorkspacesController {
     @Body() dto: InviteMemberDto,
   ) {
     return this.workspaces.invite(workspaceId, user.id, dto);
+  }
+
+  @Post('invitations/accept')
+  @ApiOperation({ summary: 'Accept a workspace invitation' })
+  acceptInvitation(@CurrentUser() user: AuthUser, @Body() dto: AcceptInvitationDto) {
+    return this.workspaces.acceptInvitation(dto.token, user.id, user.email);
   }
 
   @Patch(':workspaceId/members/:memberId')

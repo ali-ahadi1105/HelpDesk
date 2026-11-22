@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from 'react';
-import { Navigate, useNavigate } from 'react-router-dom';
+import { Navigate, useLocation, useNavigate } from 'react-router-dom';
 import { CheckCircle2, LoaderCircle, LockKeyhole, Sparkles } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { ApiError } from '../lib/api';
@@ -7,6 +7,7 @@ import { ApiError } from '../lib/api';
 export function AuthPage() {
   const { user, login, register } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
   const [mode, setMode] = useState<'login' | 'register'>('login');
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
@@ -14,7 +15,10 @@ export function AuthPage() {
   const [error, setError] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
-  if (user) return <Navigate to="/workspaces" replace />;
+  // An invitation link redirects here when the invitee is not signed in yet.
+  const destination = (location.state as { from?: string } | null)?.from ?? '/workspaces';
+
+  if (user) return <Navigate to={destination} replace />;
 
   async function submit(event: FormEvent) {
     event.preventDefault();
@@ -23,7 +27,7 @@ export function AuthPage() {
     try {
       if (mode === 'login') await login(email, password);
       else await register(name, email, password);
-      navigate('/workspaces');
+      navigate(destination, { replace: true });
     } catch (caught) {
       setError(caught instanceof ApiError ? caught.message : 'Unable to continue. Please try again.');
     } finally {

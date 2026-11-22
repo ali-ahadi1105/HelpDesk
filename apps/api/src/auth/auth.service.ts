@@ -54,18 +54,35 @@ export class AuthService {
   }
 
   async refresh(refreshToken: string): Promise<AuthResponse> {
-    const stored = await this.prisma.refreshToken.findUnique({
-      where: { tokenHash: this.hashToken(refreshToken) },
-      include: { user: true },
+    const tokenHash = this.hashToken(refreshToken);
+    const user = await this.prisma.user.findFirst({
+      where: { refreshTokens: { some: { tokenHash } } },
     });
-    if (!stored || stored.revokedAt || stored.expiresAt <= new Date()) {
-      throw new UnauthorizedException('Refresh token is invalid or expired');
-    }
-    await this.prisma.refreshToken.update({
-      where: { id: stored.id },
-      data: { revokedAt: new Date() },
+    if (!user) throw new UnauthorizedException('Refresh token is invalid or expired');
+
+    const session = await this.signSession(user);
+    const replaced = await this.prisma.$transaction(async (tx) => {
+      // Claim the presented token with a conditional update so exactly one
+      // concurrent request can win: the WHERE clause only matches a row that
+      // is still unrevoked and unexpired when the update executes.
+      const claimed = await tx.refreshToken.updateMany({
+        where: { tokenHash, revokedAt: null, expiresAt: { gt: new Date() } },
+        data: { revokedAt: new Date() },
+      });
+      if (claimed.count !== 1) return false;
+
+      await tx.refreshToken.create({
+        data: {
+          userId: user.id,
+          tokenHash: this.hashToken(session.refreshToken),
+          expiresAt: new Date(Date.now() + this.refreshTtlSeconds() * 1000),
+        },
+      });
+      return true;
     });
-    return this.issueTokens(stored.user);
+    if (!replaced) throw new UnauthorizedException('Refresh token is invalid or expired');
+
+    return { ...session, user: { id: user.id, email: user.email, name: user.name } };
   }
 
   async logout(userId: string, accessJti: string): Promise<void> {
@@ -84,6 +101,18 @@ export class AuthService {
   }
 
   private async issueTokens(user: User): Promise<AuthResponse> {
+    const session = await this.signSession(user);
+    await this.prisma.refreshToken.create({
+      data: {
+        userId: user.id,
+        tokenHash: this.hashToken(session.refreshToken),
+        expiresAt: new Date(Date.now() + this.refreshTtlSeconds() * 1000),
+      },
+    });
+    return session;
+  }
+
+  private async signSession(user: User): Promise<AuthResponse> {
     const jti = randomUUID();
     const accessTtl = this.config.get<string>('JWT_ACCESS_TTL', '15m');
     const refreshTtl = this.refreshTtlSeconds();
@@ -103,14 +132,6 @@ export class AuthService {
         },
       ),
     ]);
-
-    await this.prisma.refreshToken.create({
-      data: {
-        userId: user.id,
-        tokenHash: this.hashToken(refreshToken),
-        expiresAt: new Date(Date.now() + refreshTtl * 1000),
-      },
-    });
 
     return {
       accessToken,

@@ -1,11 +1,53 @@
 import { PrismaClient, Role, TaskPriority, TaskStatus } from '@prisma/client';
 import { hash } from 'bcryptjs';
+import { randomBytes } from 'node:crypto';
 
 const prisma = new PrismaClient();
 
+const LEGACY_DEMO_EMAIL = 'demo@taskflow.local';
+
+/**
+ * Rotates the credential of a demo owner created by an earlier release so the
+ * documented password can never be used again, and revokes its live sessions.
+ */
+async function neutralizeLegacyDemoOwner(): Promise<void> {
+  const legacy = await prisma.user.findUnique({ where: { email: LEGACY_DEMO_EMAIL } });
+  if (!legacy) return;
+
+  await prisma.user.update({
+    where: { id: legacy.id },
+    data: { passwordHash: await hash(randomBytes(32).toString('hex'), 12) },
+  });
+  await prisma.refreshToken.updateMany({
+    where: { userId: legacy.id, revokedAt: null },
+    data: { revokedAt: new Date() },
+  });
+  console.log(`Rotated the legacy demo owner credential for ${LEGACY_DEMO_EMAIL}.`);
+}
+
 async function main(): Promise<void> {
-  const email = process.env.SEED_USER_EMAIL ?? 'demo@taskflow.local';
-  const password = process.env.SEED_USER_PASSWORD ?? 'DemoPass123!';
+  const email = process.env.SEED_USER_EMAIL?.trim();
+  const password = process.env.SEED_USER_PASSWORD;
+
+  // The demo owner is opt-in: seeding one by default would publish a known
+  // credential on every deployment. Both variables must be supplied to run it.
+  if (!email || !password) {
+    await neutralizeLegacyDemoOwner();
+    console.log(
+      'Skipping demo seed: set SEED_USER_EMAIL and SEED_USER_PASSWORD to create a demo owner.',
+    );
+    return;
+  }
+
+  if (email.toLowerCase() === LEGACY_DEMO_EMAIL) {
+    // The operator explicitly claimed the legacy address, so apply their password.
+    await prisma.user.update({
+      where: { email: LEGACY_DEMO_EMAIL },
+      data: { passwordHash: await hash(password, 12) },
+    });
+  } else {
+    await neutralizeLegacyDemoOwner();
+  }
 
   const user = await prisma.user.upsert({
     where: { email },

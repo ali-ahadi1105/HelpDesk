@@ -104,3 +104,17 @@ export interface AuthSession {
   expiresIn: number;
   user: User;
 }
+
+export interface Invitation {
+  id: string;
+  email: string;
+  role: Role;
+  token: string;
+  expiresAt: string;
+}
+
+export interface AcceptedInvitation {
+  membershipId: string;
+  workspaceId: string;
+  role: Role;
+}
