@@ -71,6 +71,24 @@ export interface TaskComment {
   author: User;
 }
 
+export interface TaskAttachment {
+  id: string;
+  taskId: string;
+  fileName: string;
+  mimeType: string;
+  size: number;
+  url: string;
+  createdAt: string;
+  uploadedBy: { id: string; name: string };
+}
+
+export interface TaskDetails extends Task {
+  createdBy: { id: string; name: string };
+  comments: TaskComment[];
+  attachments: TaskAttachment[];
+  activities: Activity[];
+}
+
 export interface Activity {
   id: string;
   type: string;

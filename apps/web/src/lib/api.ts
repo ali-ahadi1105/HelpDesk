@@ -45,8 +45,19 @@ export async function apiRequest<T>(
   options: RequestInit = {},
   retry = true,
 ): Promise<T> {
+  const response = await fetchResponse(path, options, retry);
+  if (response.status === 204) return undefined as T;
+
+  const text = await response.text();
+  if (!text) return undefined as T;
+  return JSON.parse(text) as T;
+}
+
+async function fetchResponse(path: string, options: RequestInit, retry: boolean): Promise<Response> {
   const headers = new Headers(options.headers);
-  if (options.body && !headers.has('Content-Type')) headers.set('Content-Type', 'application/json');
+  if (options.body && !(options.body instanceof FormData) && !headers.has('Content-Type')) {
+    headers.set('Content-Type', 'application/json');
+  }
   if (accessToken) headers.set('Authorization', `Bearer ${accessToken}`);
 
   const response = await fetch(`${API_URL}${path}`, {
@@ -58,7 +69,7 @@ export async function apiRequest<T>(
   if (response.status === 401 && retry && !path.startsWith('/auth/')) {
     try {
       await refreshSession();
-      return apiRequest<T>(path, options, false);
+      return fetchResponse(path, options, false);
     } catch {
       accessToken = null;
     }
@@ -75,8 +86,16 @@ export async function apiRequest<T>(
     throw new ApiError(message, response.status, body);
   }
 
-  if (response.status === 204) return undefined as T;
-  return (await response.json()) as T;
+  return response;
+}
+
+export async function downloadFile(path: string): Promise<{ blob: Blob; fileName: string }> {
+  const response = await fetchResponse(path, {}, true);
+  const disposition = response.headers.get('content-disposition') ?? '';
+  const encoded = /filename\*=UTF-8''([^;]+)/i.exec(disposition)?.[1];
+  const plain = /filename="?([^";]+)"?/i.exec(disposition)?.[1];
+  const fileName = encoded ? decodeURIComponent(encoded) : (plain ?? 'attachment');
+  return { blob: await response.blob(), fileName };
 }
 
 export const api = {
@@ -89,4 +108,6 @@ export const api = {
   patch: <T>(path: string, body: unknown) =>
     apiRequest<T>(path, { method: 'PATCH', body: JSON.stringify(body) }),
   delete: <T>(path: string) => apiRequest<T>(path, { method: 'DELETE' }),
+  upload: <T>(path: string, form: FormData) =>
+    apiRequest<T>(path, { method: 'POST', body: form }),
 };

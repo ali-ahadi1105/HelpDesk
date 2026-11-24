@@ -1,7 +1,8 @@
 import { useState, type FormEvent } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Copy, LoaderCircle, MailPlus, ShieldCheck, UserPlus } from 'lucide-react';
+import { Copy, LoaderCircle, MailPlus, ShieldCheck, Trash2, UserPlus } from 'lucide-react';
 import { useParams } from 'react-router-dom';
+import { useAuth } from '../contexts/AuthContext';
 import { api, ApiError } from '../lib/api';
 import type { Invitation, Role, WorkspaceDetails } from '../types';
 
@@ -11,6 +12,7 @@ function invitationLink(token: string): string {
 
 export function WorkspaceSettingsPage() {
   const { workspaceId } = useParams();
+  const { user } = useAuth();
   const queryClient = useQueryClient();
   const [email, setEmail] = useState('');
   const [role, setRole] = useState<Role>('MEMBER');
@@ -46,6 +48,19 @@ export function WorkspaceSettingsPage() {
     },
   });
 
+  const removeMember = useMutation({
+    mutationFn: (memberId: string) => api.delete(`/workspaces/${workspaceId}/members/${memberId}`),
+    onSuccess: async () => {
+      setMessage('');
+      setError('');
+      await queryClient.invalidateQueries({ queryKey: ['workspace', workspaceId] });
+    },
+    onError: (caught) => {
+      setMessage('');
+      setError(caught instanceof ApiError ? caught.message : 'Unable to remove the member.');
+    },
+  });
+
   function submit(event: FormEvent) {
     event.preventDefault();
     invite.mutate();
@@ -58,9 +73,10 @@ export function WorkspaceSettingsPage() {
     return <div className="alert alert--error">Unable to load workspace settings.</div>;
   }
 
-  const canManage = workspace.data.memberships.some(
-    (membership) => membership.role === 'OWNER' || membership.role === 'ADMIN',
-  );
+  const currentRole = workspace.data.memberships.find(
+    (membership) => membership.user.id === user?.id,
+  )?.role;
+  const canManage = currentRole === 'OWNER' || currentRole === 'ADMIN';
 
   return (
     <main className="page-container">
@@ -83,16 +99,30 @@ export function WorkspaceSettingsPage() {
                 <span>{membership.user.email}</span>
               </div>
               {canManage && membership.role !== 'OWNER' ? (
-                <select
-                  value={membership.role}
-                  onChange={(event) => updateRole.mutate({ memberId: membership.id, nextRole: event.target.value as Role })}
-                  disabled={updateRole.isPending}
-                  aria-label={`Role for ${membership.user.name}`}
-                >
-                  <option value="ADMIN">Admin</option>
-                  <option value="MEMBER">Member</option>
-                  <option value="VIEWER">Viewer</option>
-                </select>
+                <div className="member-row__actions">
+                  <select
+                    value={membership.role}
+                    onChange={(event) => updateRole.mutate({ memberId: membership.id, nextRole: event.target.value as Role })}
+                    disabled={updateRole.isPending}
+                    aria-label={`Role for ${membership.user.name}`}
+                  >
+                    <option value="ADMIN">Admin</option>
+                    <option value="MEMBER">Member</option>
+                    <option value="VIEWER">Viewer</option>
+                  </select>
+                  <button
+                    className="icon-button"
+                    onClick={() => {
+                      if (window.confirm(`Remove ${membership.user.name} from this workspace?`)) {
+                        removeMember.mutate(membership.id);
+                      }
+                    }}
+                    aria-label={`Remove ${membership.user.name}`}
+                    disabled={removeMember.isPending}
+                  >
+                    <Trash2 size={16} />
+                  </button>
+                </div>
               ) : (
                 <span className="role-badge">{membership.role.toLowerCase()}</span>
               )}

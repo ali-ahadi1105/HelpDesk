@@ -342,4 +342,275 @@ describe('TaskFlow API (e2e)', () => {
       .set('Authorization', `Bearer ${session.accessToken}`)
       .expect(404);
   });
+
+  it('uploads, lists, downloads, and removes task attachments', async () => {
+    const session = await register({
+      name: owner.name,
+      email: `attachment-owner-${suffix}@taskflow.local`,
+      password: owner.password,
+    });
+    const workspace = await request(app.getHttpServer())
+      .post('/workspaces')
+      .set('Authorization', `Bearer ${session.accessToken}`)
+      .send({ name: 'E2E Attachment Workspace' })
+      .expect(201);
+    const workspaceId = workspace.body.id as string;
+
+    const project = await request(app.getHttpServer())
+      .post(`/workspaces/${workspaceId}/projects`)
+      .set('Authorization', `Bearer ${session.accessToken}`)
+      .send({ name: 'E2E Attachment Project' })
+      .expect(201);
+    const projectId = project.body.id as string;
+    const todoColumn = (project.body.columns as { id: string; status: string }[]).find(
+      (column) => column.status === 'TODO',
+    );
+
+    const task = await request(app.getHttpServer())
+      .post(`/workspaces/${workspaceId}/projects/${projectId}/tasks`)
+      .set('Authorization', `Bearer ${session.accessToken}`)
+      .send({ title: 'E2E attachment task', columnId: todoColumn!.id })
+      .expect(201);
+    const taskId = task.body.id as string;
+
+    const uploaded = await request(app.getHttpServer())
+      .post(`/workspaces/${workspaceId}/tasks/${taskId}/attachments`)
+      .set('Authorization', `Bearer ${session.accessToken}`)
+      .attach('file', Buffer.from('attachment body'), {
+        filename: 'notes.txt',
+        contentType: 'text/plain',
+      })
+      .expect(201);
+    expect(uploaded.body.fileName).toBe('notes.txt');
+    expect(uploaded.body.size).toBe(15);
+
+    const listed = await request(app.getHttpServer())
+      .get(`/workspaces/${workspaceId}/tasks/${taskId}/attachments`)
+      .set('Authorization', `Bearer ${session.accessToken}`)
+      .expect(200);
+    expect(listed.body).toHaveLength(1);
+
+    const downloaded = await request(app.getHttpServer())
+      .get(`/workspaces/${workspaceId}/tasks/${taskId}/attachments/${uploaded.body.id}`)
+      .set('Authorization', `Bearer ${session.accessToken}`)
+      .expect(200);
+    expect(downloaded.text).toBe('attachment body');
+
+    await request(app.getHttpServer())
+      .delete(`/workspaces/${workspaceId}/tasks/${taskId}/attachments/${uploaded.body.id}`)
+      .set('Authorization', `Bearer ${session.accessToken}`)
+      .expect(200);
+
+    await request(app.getHttpServer())
+      .get(`/workspaces/${workspaceId}/tasks/${taskId}/attachments/${uploaded.body.id}`)
+      .set('Authorization', `Bearer ${session.accessToken}`)
+      .expect(404);
+  });
+
+  it('keeps task attachments isolated between workspaces', async () => {
+    const ownerSession = await register({
+      name: owner.name,
+      email: `attachment-isolation-owner-${suffix}@taskflow.local`,
+      password: owner.password,
+    });
+    const outsiderSession = await register({
+      name: outsider.name,
+      email: `attachment-isolation-outsider-${suffix}@taskflow.local`,
+      password: owner.password,
+    });
+
+    const workspace = await request(app.getHttpServer())
+      .post('/workspaces')
+      .set('Authorization', `Bearer ${ownerSession.accessToken}`)
+      .send({ name: 'E2E Attachment Isolation Workspace' })
+      .expect(201);
+    const workspaceId = workspace.body.id as string;
+
+    const project = await request(app.getHttpServer())
+      .post(`/workspaces/${workspaceId}/projects`)
+      .set('Authorization', `Bearer ${ownerSession.accessToken}`)
+      .send({ name: 'E2E Attachment Isolation Project' })
+      .expect(201);
+    const todoColumn = (project.body.columns as { id: string; status: string }[]).find(
+      (column) => column.status === 'TODO',
+    );
+
+    const task = await request(app.getHttpServer())
+      .post(`/workspaces/${workspaceId}/projects/${project.body.id}/tasks`)
+      .set('Authorization', `Bearer ${ownerSession.accessToken}`)
+      .send({ title: 'E2E isolated attachment task', columnId: todoColumn!.id })
+      .expect(201);
+    const taskId = task.body.id as string;
+
+    const uploaded = await request(app.getHttpServer())
+      .post(`/workspaces/${workspaceId}/tasks/${taskId}/attachments`)
+      .set('Authorization', `Bearer ${ownerSession.accessToken}`)
+      .attach('file', Buffer.from('secret'), {
+        filename: 'secret.txt',
+        contentType: 'text/plain',
+      })
+      .expect(201);
+
+    await request(app.getHttpServer())
+      .get(`/workspaces/${workspaceId}/tasks/${taskId}/attachments/${uploaded.body.id}`)
+      .set('Authorization', `Bearer ${outsiderSession.accessToken}`)
+      .expect(403);
+
+    await request(app.getHttpServer())
+      .delete(`/workspaces/${workspaceId}/tasks/${taskId}/attachments/${uploaded.body.id}`)
+      .set('Authorization', `Bearer ${outsiderSession.accessToken}`)
+      .expect(403);
+  });
+
+  it('renames columns, removes empty columns, and deletes a project', async () => {
+    const session = await register({
+      name: owner.name,
+      email: `columns-owner-${suffix}@taskflow.local`,
+      password: owner.password,
+    });
+    const workspace = await request(app.getHttpServer())
+      .post('/workspaces')
+      .set('Authorization', `Bearer ${session.accessToken}`)
+      .send({ name: 'E2E Column Workspace' })
+      .expect(201);
+    const workspaceId = workspace.body.id as string;
+
+    const project = await request(app.getHttpServer())
+      .post(`/workspaces/${workspaceId}/projects`)
+      .set('Authorization', `Bearer ${session.accessToken}`)
+      .send({ name: 'E2E Column Project' })
+      .expect(201);
+    const projectId = project.body.id as string;
+    const columns = project.body.columns as { id: string; title: string }[];
+
+    const renamed = await request(app.getHttpServer())
+      .patch(`/workspaces/${workspaceId}/projects/${projectId}/columns/${columns[0]!.id}`)
+      .set('Authorization', `Bearer ${session.accessToken}`)
+      .send({ title: 'Backlog' })
+      .expect(200);
+    expect(renamed.body.title).toBe('Backlog');
+
+    await request(app.getHttpServer())
+      .delete(`/workspaces/${workspaceId}/projects/${projectId}/columns/${columns[1]!.id}`)
+      .set('Authorization', `Bearer ${session.accessToken}`)
+      .expect(200);
+
+    await request(app.getHttpServer())
+      .delete(`/workspaces/${workspaceId}/projects/${projectId}`)
+      .set('Authorization', `Bearer ${session.accessToken}`)
+      .expect(200);
+
+    await request(app.getHttpServer())
+      .get(`/workspaces/${workspaceId}/projects/${projectId}`)
+      .set('Authorization', `Bearer ${session.accessToken}`)
+      .expect(404);
+  });
+
+  it('prevents a member from removing a column that still holds tasks', async () => {
+    const session = await register({
+      name: owner.name,
+      email: `column-guard-owner-${suffix}@taskflow.local`,
+      password: owner.password,
+    });
+    const workspace = await request(app.getHttpServer())
+      .post('/workspaces')
+      .set('Authorization', `Bearer ${session.accessToken}`)
+      .send({ name: 'E2E Column Guard Workspace' })
+      .expect(201);
+    const workspaceId = workspace.body.id as string;
+
+    const project = await request(app.getHttpServer())
+      .post(`/workspaces/${workspaceId}/projects`)
+      .set('Authorization', `Bearer ${session.accessToken}`)
+      .send({ name: 'E2E Column Guard Project' })
+      .expect(201);
+    const projectId = project.body.id as string;
+    const todoColumn = (project.body.columns as { id: string; status: string }[]).find(
+      (column) => column.status === 'TODO',
+    );
+
+    await request(app.getHttpServer())
+      .post(`/workspaces/${workspaceId}/projects/${projectId}/tasks`)
+      .set('Authorization', `Bearer ${session.accessToken}`)
+      .send({ title: 'E2E blocking task', columnId: todoColumn!.id })
+      .expect(201);
+
+    await request(app.getHttpServer())
+      .delete(`/workspaces/${workspaceId}/projects/${projectId}/columns/${todoColumn!.id}`)
+      .set('Authorization', `Bearer ${session.accessToken}`)
+      .expect(400);
+  });
+
+  it('updates task details and removes a workspace member', async () => {
+    const ownerSession = await register({
+      name: owner.name,
+      email: `member-owner-${suffix}@taskflow.local`,
+      password: owner.password,
+    });
+    const memberSession = await register({
+      name: 'E2E Member',
+      email: `member-${suffix}@taskflow.local`,
+      password: owner.password,
+    });
+
+    const workspace = await request(app.getHttpServer())
+      .post('/workspaces')
+      .set('Authorization', `Bearer ${ownerSession.accessToken}`)
+      .send({ name: 'E2E Member Workspace' })
+      .expect(201);
+    const workspaceId = workspace.body.id as string;
+
+    const invitation = await request(app.getHttpServer())
+      .post(`/workspaces/${workspaceId}/invitations`)
+      .set('Authorization', `Bearer ${ownerSession.accessToken}`)
+      .send({ email: `member-${suffix}@taskflow.local`, role: 'MEMBER' })
+      .expect(201);
+    await request(app.getHttpServer())
+      .post('/workspaces/invitations/accept')
+      .set('Authorization', `Bearer ${memberSession.accessToken}`)
+      .send({ token: invitation.body.token })
+      .expect(201);
+
+    const project = await request(app.getHttpServer())
+      .post(`/workspaces/${workspaceId}/projects`)
+      .set('Authorization', `Bearer ${ownerSession.accessToken}`)
+      .send({ name: 'E2E Member Project' })
+      .expect(201);
+    const todoColumn = (project.body.columns as { id: string; status: string }[]).find(
+      (column) => column.status === 'TODO',
+    );
+
+    const task = await request(app.getHttpServer())
+      .post(`/workspaces/${workspaceId}/projects/${project.body.id}/tasks`)
+      .set('Authorization', `Bearer ${ownerSession.accessToken}`)
+      .send({ title: 'E2E assignment task', columnId: todoColumn!.id })
+      .expect(201);
+
+    const memberDetails = await request(app.getHttpServer())
+      .get(`/workspaces/${workspaceId}`)
+      .set('Authorization', `Bearer ${ownerSession.accessToken}`)
+      .expect(200);
+    const memberMembership = (
+      memberDetails.body.memberships as { id: string; role: string; userId: string }[]
+    ).find((membership) => membership.role === 'MEMBER');
+    expect(memberMembership).toBeDefined();
+
+    const updated = await request(app.getHttpServer())
+      .patch(`/workspaces/${workspaceId}/tasks/${task.body.id}`)
+      .set('Authorization', `Bearer ${ownerSession.accessToken}`)
+      .send({ title: 'E2E assigned task', assigneeId: memberMembership!.userId })
+      .expect(200);
+    expect(updated.body.title).toBe('E2E assigned task');
+    expect(updated.body.assigneeId).toBe(memberMembership!.userId);
+
+    await request(app.getHttpServer())
+      .delete(`/workspaces/${workspaceId}/members/${memberMembership!.id}`)
+      .set('Authorization', `Bearer ${ownerSession.accessToken}`)
+      .expect(200);
+
+    await request(app.getHttpServer())
+      .get(`/workspaces/${workspaceId}`)
+      .set('Authorization', `Bearer ${memberSession.accessToken}`)
+      .expect(403);
+  });
 });

@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { APP_FILTER, APP_GUARD } from '@nestjs/core';
+import { AttachmentsModule } from './attachments/attachments.module';
 import { AuthModule } from './auth/auth.module';
 import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
 import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
@@ -34,6 +35,7 @@ function validateConfig(config: Record<string, unknown>): Record<string, unknown
     ProjectsModule,
     TasksModule,
     DashboardModule,
+    AttachmentsModule,
     HealthModule,
   ],
   providers: [
