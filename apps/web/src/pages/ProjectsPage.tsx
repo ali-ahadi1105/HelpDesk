@@ -1,13 +1,16 @@
 import { useState, type FormEvent } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { FolderKanban, LoaderCircle, Plus } from 'lucide-react';
+import { FolderKanban, LoaderCircle, Plus, Trash2 } from 'lucide-react';
 import { Link, useParams } from 'react-router-dom';
+import { useWorkspaceRole } from '../hooks/useWorkspaceRole';
 import { api, ApiError } from '../lib/api';
 import type { Project } from '../types';
 
 export function ProjectsPage() {
   const { workspaceId } = useParams();
   const queryClient = useQueryClient();
+  const currentRole = useWorkspaceRole(workspaceId);
+  const canDelete = currentRole === 'OWNER' || currentRole === 'ADMIN';
   const [showCreate, setShowCreate] = useState(false);
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
@@ -31,6 +34,18 @@ export function ProjectsPage() {
     },
     onError: (caught) => {
       setError(caught instanceof ApiError ? caught.message : 'Unable to create project.');
+    },
+  });
+
+  const deleteProject = useMutation({
+    mutationFn: (projectId: string) => api.delete(`/workspaces/${workspaceId}/projects/${projectId}`),
+    onSuccess: async () => {
+      setError('');
+      await queryClient.invalidateQueries({ queryKey: ['projects', workspaceId] });
+      await queryClient.invalidateQueries({ queryKey: ['dashboard', workspaceId] });
+    },
+    onError: (caught) => {
+      setError(caught instanceof ApiError ? caught.message : 'Unable to delete the project.');
     },
   });
 
@@ -90,14 +105,30 @@ export function ProjectsPage() {
       ) : (
         <div className="project-grid">
           {(projects.data ?? []).map((project) => (
-            <Link key={project.id} className="project-card" to={`${project.id}`}>
-              <span className="project-card__color" style={{ background: project.color }} />
-              <div className="project-card__body">
-                <h3>{project.name}</h3>
-                <p>{project.description || 'No description yet.'}</p>
-                <span className="project-card__meta">{project._count.tasks} tasks</span>
-              </div>
-            </Link>
+            <div key={project.id} className="project-card">
+              <Link className="project-card__link" to={`${project.id}`}>
+                <span className="project-card__color" style={{ background: project.color }} />
+                <div className="project-card__body">
+                  <h3>{project.name}</h3>
+                  <p>{project.description || 'No description yet.'}</p>
+                  <span className="project-card__meta">{project._count.tasks} tasks</span>
+                </div>
+              </Link>
+              {canDelete && (
+                <button
+                  className="icon-button project-card__delete"
+                  onClick={() => {
+                    if (window.confirm(`Delete "${project.name}" and all of its tasks?`)) {
+                      deleteProject.mutate(project.id);
+                    }
+                  }}
+                  aria-label={`Delete ${project.name}`}
+                  disabled={deleteProject.isPending}
+                >
+                  <Trash2 size={16} />
+                </button>
+              )}
+            </div>
           ))}
         </div>
       )}
