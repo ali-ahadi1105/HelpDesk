@@ -5,6 +5,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { RedisService } from '../redis/redis.service';
 import { CreateWorkspaceDto } from './dto/create-workspace.dto';
 import { InviteMemberDto } from './dto/invite-member.dto';
+import { UpdateWorkspaceDto } from './dto/update-workspace.dto';
 
 @Injectable()
 export class WorkspacesService {
@@ -44,6 +45,29 @@ export class WorkspacesService {
       },
       include: { memberships: { where: { userId }, select: { role: true } } },
     });
+  }
+
+  async update(workspaceId: string, dto: UpdateWorkspaceDto) {
+    const workspace = await this.prisma.workspace.findUnique({ where: { id: workspaceId } });
+    if (!workspace) throw new NotFoundException('Workspace was not found');
+
+    const data: { name?: string; description?: string | null; slug?: string } = {};
+    if (dto.name !== undefined) data.name = dto.name.trim();
+    if (dto.description !== undefined) data.description = dto.description.trim() || null;
+    if (dto.slug !== undefined && dto.slug !== workspace.slug) {
+      if (await this.prisma.workspace.findUnique({ where: { slug: dto.slug } })) {
+        throw new ConflictException('Workspace slug is already in use');
+      }
+      data.slug = dto.slug;
+    }
+
+    const updated = await this.prisma.workspace.update({
+      where: { id: workspaceId },
+      data,
+      include: { memberships: true },
+    });
+    await this.redis.deleteWorkspaceCache(workspaceId);
+    return updated;
   }
 
   async get(workspaceId: string) {
@@ -92,6 +116,33 @@ export class WorkspacesService {
       token: invite.token,
       expiresAt: invite.expiresAt,
     };
+  }
+
+  async listInvitations(workspaceId: string) {
+    const invites = await this.prisma.workspaceInvite.findMany({
+      where: { workspaceId, acceptedAt: null, expiresAt: { gt: new Date() } },
+      select: {
+        id: true,
+        email: true,
+        role: true,
+        expiresAt: true,
+        createdAt: true,
+        invitedBy: { select: { id: true, name: true, email: true } },
+      },
+      orderBy: { createdAt: 'asc' },
+    });
+    return invites;
+  }
+
+  async cancelInvitation(workspaceId: string, invitationId: string) {
+    // Consume the invite with a conditional update so a replayed cancel
+    // cannot affect an invitation that was already accepted or cancelled.
+    const consumed = await this.prisma.workspaceInvite.updateMany({
+      where: { id: invitationId, workspaceId, acceptedAt: null },
+      data: { acceptedAt: new Date() },
+    });
+    if (consumed.count !== 1) throw new NotFoundException('Pending invitation was not found');
+    await this.redis.deleteWorkspaceCache(workspaceId);
   }
 
   async acceptInvitation(token: string, userId: string, userEmail: string) {

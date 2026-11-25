@@ -133,6 +133,15 @@ export interface Invitation {
   expiresAt: string;
 }
 
+export interface PendingInvitation {
+  id: string;
+  email: string;
+  role: Role;
+  expiresAt: string;
+  createdAt: string;
+  invitedBy: { id: string; name: string; email: string };
+}
+
 export interface AcceptedInvitation {
   membershipId: string;
   workspaceId: string;
