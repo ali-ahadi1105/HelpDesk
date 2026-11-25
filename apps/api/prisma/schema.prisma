@@ -14,6 +14,13 @@ enum Role {
   VIEWER
 }
 
+// Global (platform-level) role of a user, carried in the access token and
+// checked by RolesGuard. Distinct from the workspace-scoped Membership.role.
+enum GlobalRole {
+  USER
+  ADMIN
+}
+
 enum TaskPriority {
   LOW
   MEDIUM
@@ -42,6 +49,7 @@ model User {
   email        String            @unique
   name         String
   passwordHash String
+  globalRole   GlobalRole        @default(USER)
   createdAt    DateTime          @default(now())
   updatedAt    DateTime          @updatedAt
   memberships  Membership[]

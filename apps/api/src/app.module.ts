@@ -4,6 +4,7 @@ import { APP_FILTER, APP_GUARD } from '@nestjs/core';
 import { AttachmentsModule } from './attachments/attachments.module';
 import { AuthModule } from './auth/auth.module';
 import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
+import { GlobalRolesGuard } from './common/guards/global-roles.guard';
 import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
 import { WorkspaceGuard } from './common/guards/workspace.guard';
 import { DashboardModule } from './dashboard/dashboard.module';
@@ -40,6 +41,7 @@ function validateConfig(config: Record<string, unknown>): Record<string, unknown
   ],
   providers: [
     { provide: APP_GUARD, useClass: JwtAuthGuard },
+    { provide: APP_GUARD, useClass: GlobalRolesGuard },
     { provide: APP_GUARD, useClass: WorkspaceGuard },
     { provide: APP_FILTER, useClass: AllExceptionsFilter },
   ],

@@ -2,6 +2,7 @@ import { CanActivate, ExecutionContext, Injectable, UnauthorizedException } from
 import { ConfigService } from '@nestjs/config';
 import { Reflector } from '@nestjs/core';
 import { JwtService } from '@nestjs/jwt';
+import { GlobalRole } from '@prisma/client';
 import { IS_PUBLIC_KEY } from '../decorators/public.decorator';
 import { AuthenticatedRequest } from '../types/authenticated-request';
 import { RedisService } from '../../redis/redis.service';
@@ -11,6 +12,7 @@ interface AccessTokenPayload {
   email: string;
   name: string;
   jti: string;
+  role: GlobalRole;
   type: 'access';
 }
 
@@ -39,6 +41,7 @@ export class JwtAuthGuard implements CanActivate {
         secret: this.config.getOrThrow<string>('JWT_ACCESS_SECRET'),
       });
       if (payload.type !== 'access') throw new Error('Invalid token type');
+      if (!Object.values(GlobalRole).includes(payload.role)) throw new Error('Invalid token role');
       if (await this.redisService.isAccessTokenRevoked(payload.jti)) {
         throw new UnauthorizedException('Access token has been revoked');
       }
@@ -47,6 +50,7 @@ export class JwtAuthGuard implements CanActivate {
         email: payload.email,
         name: payload.name,
         jti: payload.jti,
+        globalRole: payload.role,
       };
       return true;
     } catch {

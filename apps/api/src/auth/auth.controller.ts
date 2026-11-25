@@ -1,13 +1,16 @@
-import { Body, Controller, HttpCode, HttpStatus, Post, Req, Res, UnauthorizedException } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, HttpStatus, Param, Patch, Post, Req, Res, UnauthorizedException } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
+import { GlobalRole } from '@prisma/client';
 import { Request, Response } from 'express';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
+import { GlobalRoles } from '../common/decorators/global-roles.decorator';
 import { Public } from '../common/decorators/public.decorator';
 import { AuthUser } from '../common/types/authenticated-request';
-import { AuthResponse, AuthService } from './auth.service';
+import { AuthResponse, AuthService, AuthUserProfile } from './auth.service';
 import { LoginDto } from './dto/login.dto';
 import { RefreshDto } from './dto/refresh.dto';
 import { RegisterDto } from './dto/register.dto';
+import { UpdateGlobalRoleDto } from './dto/update-global-role.dto';
 
 const REFRESH_COOKIE = 'taskflow_refresh';
 
@@ -67,6 +70,25 @@ export class AuthController {
   ): Promise<void> {
     await this.authService.logout(user.id, user.jti);
     response.clearCookie(REFRESH_COOKIE, { path: '/auth' });
+  }
+
+  @Get('me')
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Get the current account profile and global role' })
+  async me(@CurrentUser() user: AuthUser): Promise<AuthUserProfile> {
+    return this.authService.me(user.id);
+  }
+
+  @Patch('users/:userId/role')
+  @GlobalRoles(GlobalRole.ADMIN)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Update a user global role (platform admin only)' })
+  async updateGlobalRole(
+    @Param('userId') userId: string,
+    @Body() dto: UpdateGlobalRoleDto,
+    @CurrentUser() user: AuthUser,
+  ): Promise<AuthUserProfile> {
+    return this.authService.updateGlobalRole(userId, dto.role, user.id);
   }
 
   private setRefreshCookie(response: Response, token: string): void {
