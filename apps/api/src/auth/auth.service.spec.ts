@@ -1,12 +1,12 @@
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
-import { UnauthorizedException } from '@nestjs/common';
+import { BadRequestException, UnauthorizedException } from '@nestjs/common';
 import { hash } from 'bcryptjs';
 import { AuthService } from './auth.service';
 
 describe('AuthService', () => {
   const prisma = {
-    user: { findUnique: jest.fn(), findFirst: jest.fn(), create: jest.fn() },
+    user: { findUnique: jest.fn(), findFirst: jest.fn(), create: jest.fn(), update: jest.fn() },
     refreshToken: { create: jest.fn(), updateMany: jest.fn() },
     $transaction: jest.fn(),
   };
@@ -110,6 +110,7 @@ describe('AuthService', () => {
       id: 'user-id',
       email: 'alex@example.com',
       name: 'Alex',
+      globalRole: 'USER',
     };
     prisma.user.findFirst.mockResolvedValue(user);
     const updateMany = jest.fn().mockResolvedValue({ count: 1 });
@@ -123,11 +124,56 @@ describe('AuthService', () => {
     const result = await service.refresh('valid-refresh-token');
 
     expect(result.accessToken).toBe('access-token');
+    expect(result.user.globalRole).toBe('USER');
     expect(updateMany).toHaveBeenCalledWith(
       expect.objectContaining({
         where: expect.objectContaining({ revokedAt: null }),
       }),
     );
     expect(create).toHaveBeenCalledTimes(1);
+  });
+
+  it('embeds the global role in the signed access token', async () => {
+    const user = {
+      id: 'user-id',
+      email: 'alex@example.com',
+      name: 'Alex',
+      passwordHash: await hash('password', 4),
+      globalRole: 'ADMIN',
+    };
+    prisma.user.findUnique.mockResolvedValue(user);
+    prisma.refreshToken.create.mockResolvedValue({});
+    jwtService.signAsync.mockResolvedValueOnce('access-token').mockResolvedValueOnce('refresh-token');
+
+    const result = await service.login({ email: 'alex@example.com', password: 'password' });
+
+    expect(result.user.globalRole).toBe('ADMIN');
+    expect(jwtService.signAsync).toHaveBeenCalledWith(
+      expect.objectContaining({ role: 'ADMIN', type: 'access' }),
+      expect.anything(),
+    );
+  });
+
+  it('rejects a self-demotion of the global role', async () => {
+    await expect(service.updateGlobalRole('user-id', 'USER' as never, 'user-id')).rejects.toBeInstanceOf(
+      BadRequestException,
+    );
+  });
+
+  it('updates the global role of another user', async () => {
+    prisma.user.update = jest.fn().mockResolvedValue({
+      id: 'other-id',
+      email: 'other@example.com',
+      name: 'Other',
+      globalRole: 'ADMIN',
+    });
+
+    const result = await service.updateGlobalRole('other-id', 'ADMIN' as never, 'user-id');
+
+    expect(prisma.user.update).toHaveBeenCalledWith({
+      where: { id: 'other-id' },
+      data: { globalRole: 'ADMIN' },
+    });
+    expect(result.globalRole).toBe('ADMIN');
   });
 });

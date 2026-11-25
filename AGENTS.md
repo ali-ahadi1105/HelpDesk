@@ -6,6 +6,8 @@
 - `WorkspaceRoles` only guards routes that carry the decorator, and the global `JwtAuthGuard` protects everything not marked `@Public()`. A route that resolves its tenant from a request body rather than a `:workspaceId` param needs its own authorization check.
 - Every query that accepts a client-supplied project, column, or task id must bind it to the tenant in the same lookup (for example `where: { id, workspaceId }`). Scoping only by `projectId` allows cross-workspace writes.
 - Refresh tokens are stored hashed in PostgreSQL and delivered only through the HTTP-only `taskflow_refresh` cookie.
+- Users also carry a platform-level `globalRole` (`USER` or `ADMIN`), separate from the workspace-scoped `Membership.role`. The role is embedded in the JWT access token, so a role change takes effect on the next token and existing tokens cannot be reused to bypass a demotion beyond the access-token TTL.
+- Routes annotated with `@GlobalRoles(...)` are enforced by the global `GlobalRolesGuard` (registered after `JwtAuthGuard`), which reads the role from the verified token. Workspace-scoped authorization still uses `@WorkspaceRoles(...)` with `WorkspaceGuard`.
 - Refresh-token rotation is atomic: claim the presented token with a conditional `updateMany` (`revokedAt: null`, not expired) inside a transaction and persist the replacement only when exactly one row is claimed. A read-then-update leaves a reuse race.
 - Single-use resources (invitations, tokens) are consumed with a conditional `updateMany` and their side effect in the same transaction, so a replay cannot create a second effect.
 - Prisma schema changes require a matching migration under `apps/api/prisma/migrations`.

@@ -1,4 +1,5 @@
 export type Role = 'OWNER' | 'ADMIN' | 'MEMBER' | 'VIEWER';
+export type GlobalRole = 'USER' | 'ADMIN';
 export type TaskPriority = 'LOW' | 'MEDIUM' | 'HIGH' | 'URGENT';
 export type TaskStatus = 'TODO' | 'IN_PROGRESS' | 'DONE';
 
@@ -6,6 +7,7 @@ export interface User {
   id: string;
   email: string;
   name: string;
+  globalRole: GlobalRole;
 }
 
 export interface Workspace {

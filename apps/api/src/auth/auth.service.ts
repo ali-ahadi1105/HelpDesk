@@ -1,7 +1,7 @@
-import { ConflictException, Injectable, UnauthorizedException } from '@nestjs/common';
+import { BadRequestException, ConflictException, Injectable, NotFoundException, UnauthorizedException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
-import { Role, User } from '@prisma/client';
+import { GlobalRole, Prisma, Role, User } from '@prisma/client';
 import { compare, hash } from 'bcryptjs';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { PrismaService } from '../prisma/prisma.service';
@@ -16,8 +16,10 @@ export interface TokenPair {
 }
 
 export interface AuthResponse extends TokenPair {
-  user: Pick<User, 'id' | 'email' | 'name'>;
+  user: AuthUserProfile;
 }
+
+export type AuthUserProfile = Pick<User, 'id' | 'email' | 'name' | 'globalRole'>;
 
 @Injectable()
 export class AuthService {
@@ -82,7 +84,7 @@ export class AuthService {
     });
     if (!replaced) throw new UnauthorizedException('Refresh token is invalid or expired');
 
-    return { ...session, user: { id: user.id, email: user.email, name: user.name } };
+    return { ...session, user: this.profileOf(user) };
   }
 
   async logout(userId: string, accessJti: string): Promise<void> {
@@ -98,6 +100,27 @@ export class AuthService {
       where: { workspaceId_userId: { workspaceId, userId } },
     });
     return membership?.role;
+  }
+
+  async me(userId: string): Promise<AuthUserProfile> {
+    const user = await this.prisma.user.findUnique({ where: { id: userId } });
+    if (!user) throw new UnauthorizedException('Account no longer exists');
+    return this.profileOf(user);
+  }
+
+  async updateGlobalRole(userId: string, role: GlobalRole, actorId: string): Promise<AuthUserProfile> {
+    if (userId === actorId && role !== GlobalRole.ADMIN) {
+      throw new BadRequestException('You cannot change your own global role');
+    }
+    try {
+      const user = await this.prisma.user.update({ where: { id: userId }, data: { globalRole: role } });
+      return this.profileOf(user);
+    } catch (error) {
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2025') {
+        throw new NotFoundException('User was not found');
+      }
+      throw error;
+    }
   }
 
   private async issueTokens(user: User): Promise<AuthResponse> {
@@ -118,7 +141,7 @@ export class AuthService {
     const refreshTtl = this.refreshTtlSeconds();
     const [accessToken, refreshToken] = await Promise.all([
       this.jwtService.signAsync(
-        { sub: user.id, email: user.email, name: user.name, jti, type: 'access' as const },
+        { sub: user.id, email: user.email, name: user.name, jti, role: user.globalRole, type: 'access' as const },
         {
           secret: this.config.getOrThrow<string>('JWT_ACCESS_SECRET'),
           expiresIn: accessTtl as `${number}${'s' | 'm' | 'h' | 'd'}`,
@@ -137,8 +160,12 @@ export class AuthService {
       accessToken,
       refreshToken,
       expiresIn: this.accessTtlSeconds(),
-      user: { id: user.id, email: user.email, name: user.name },
+      user: this.profileOf(user),
     };
+  }
+
+  private profileOf(user: User): AuthUserProfile {
+    return { id: user.id, email: user.email, name: user.name, globalRole: user.globalRole as GlobalRole };
   }
 
   private hashToken(token: string): string {

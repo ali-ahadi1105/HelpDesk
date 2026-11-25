@@ -1,4 +1,4 @@
-import { PrismaClient, Role, TaskPriority, TaskStatus } from '@prisma/client';
+import { PrismaClient, GlobalRole, Role, TaskPriority, TaskStatus } from '@prisma/client';
 import { hash } from 'bcryptjs';
 import { randomBytes } from 'node:crypto';
 
@@ -56,12 +56,14 @@ async function main(): Promise<void> {
     where: { email },
     update: {
       passwordHash,
+      globalRole: GlobalRole.ADMIN,
       ...(name ? { name } : {}),
     },
     create: {
       email,
       name: name ?? 'Alex Morgan',
       passwordHash,
+      globalRole: GlobalRole.ADMIN,
     },
   });
 

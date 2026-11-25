@@ -1,4 +1,4 @@
-import { Role } from '@prisma/client';
+import { GlobalRole, Role } from '@prisma/client';
 import { Request } from 'express';
 
 export interface AuthUser {
@@ -6,6 +6,7 @@ export interface AuthUser {
   email: string;
   name: string;
   jti: string;
+  globalRole: GlobalRole;
 }
 
 export interface WorkspaceContext {
