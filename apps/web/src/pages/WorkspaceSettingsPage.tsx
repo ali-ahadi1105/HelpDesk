@@ -1,10 +1,10 @@
-import { useState, type FormEvent } from 'react';
+import { useEffect, useState, type FormEvent } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Copy, LoaderCircle, MailPlus, ShieldCheck, Trash2, UserPlus } from 'lucide-react';
+import { Copy, LoaderCircle, MailPlus, Pencil, ShieldCheck, Trash2, UserPlus, X } from 'lucide-react';
 import { useParams } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { api, ApiError } from '../lib/api';
-import type { Invitation, Role, WorkspaceDetails } from '../types';
+import type { Invitation, PendingInvitation, Role, WorkspaceDetails } from '../types';
 
 function invitationLink(token: string): string {
   return `${window.location.origin}/invitations/${token}`;
@@ -19,10 +19,55 @@ export function WorkspaceSettingsPage() {
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
   const [inviteLink, setInviteLink] = useState('');
+  const [editing, setEditing] = useState(false);
+  const [editName, setEditName] = useState('');
+  const [editDescription, setEditDescription] = useState('');
+  const [editError, setEditError] = useState('');
 
   const workspace = useQuery({
     queryKey: ['workspace', workspaceId],
     queryFn: () => api.get<WorkspaceDetails>(`/workspaces/${workspaceId}`),
+  });
+
+  const invitations = useQuery({
+    queryKey: ['workspace-invitations', workspaceId],
+    queryFn: () => api.get<PendingInvitation[]>(`/workspaces/${workspaceId}/invitations`),
+    enabled: Boolean(workspaceId),
+  });
+
+  useEffect(() => {
+    if (workspace.data) {
+      setEditName(workspace.data.name);
+      setEditDescription(workspace.data.description ?? '');
+    }
+  }, [workspace.data]);
+
+  const updateWorkspace = useMutation({
+    mutationFn: (body: { name: string; description?: string }) =>
+      api.patch<WorkspaceDetails>(`/workspaces/${workspaceId}`, body),
+    onSuccess: async () => {
+      setEditing(false);
+      setEditError('');
+      setMessage('Workspace details updated.');
+      await queryClient.invalidateQueries({ queryKey: ['workspace', workspaceId] });
+      await queryClient.invalidateQueries({ queryKey: ['workspace-summary', workspaceId] });
+      await queryClient.invalidateQueries({ queryKey: ['workspaces'] });
+    },
+    onError: (caught) => {
+      setEditError(caught instanceof ApiError ? caught.message : 'Unable to update the workspace.');
+    },
+  });
+
+  const cancelInvitation = useMutation({
+    mutationFn: (invitationId: string) =>
+      api.delete(`/workspaces/${workspaceId}/invitations/${invitationId}`),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ['workspace-invitations', workspaceId] });
+    },
+    onError: (caught) => {
+      setMessage('');
+      setError(caught instanceof ApiError ? caught.message : 'Unable to cancel the invitation.');
+    },
   });
 
   const invite = useMutation({
@@ -66,6 +111,12 @@ export function WorkspaceSettingsPage() {
     invite.mutate();
   }
 
+  function submitWorkspace(event: FormEvent) {
+    event.preventDefault();
+    setEditError('');
+    updateWorkspace.mutate({ name: editName, description: editDescription || undefined });
+  }
+
   if (workspace.isLoading) {
     return <div className="empty-state"><LoaderCircle className="spin" size={24} /> Loading settings…</div>;
   }
@@ -80,11 +131,56 @@ export function WorkspaceSettingsPage() {
 
   return (
     <main className="page-container">
-      <div className="page-heading">
-        <span className="eyebrow"><ShieldCheck size={15} /> Access & people</span>
-        <h1>Workspace settings</h1>
-        <p className="muted">Manage who can access {workspace.data.name} and what they can do.</p>
+      <div className="page-heading page-heading--split">
+        <div>
+          <span className="eyebrow"><ShieldCheck size={15} /> Access & people</span>
+          <h1>Workspace settings</h1>
+          <p className="muted">Manage who can access {workspace.data.name} and what they can do.</p>
+        </div>
+        {canManage && !editing && (
+          <button className="button button--ghost" onClick={() => setEditing(true)}>
+            <Pencil size={16} /> Edit workspace
+          </button>
+        )}
       </div>
+
+      {canManage && editing && (
+        <form className="panel form-stack" onSubmit={submitWorkspace}>
+          <div className="panel__header">
+            <div>
+              <h2>Workspace details</h2>
+              <p className="muted">Rename the workspace or update its description.</p>
+            </div>
+          </div>
+          <label>
+            Workspace name
+            <input
+              value={editName}
+              onChange={(event) => setEditName(event.target.value)}
+              minLength={2}
+              required
+            />
+          </label>
+          <label>
+            Description <span className="muted">(optional)</span>
+            <input
+              value={editDescription}
+              onChange={(event) => setEditDescription(event.target.value)}
+              placeholder="What is this workspace for?"
+            />
+          </label>
+          {editError && <div className="alert alert--error">{editError}</div>}
+          <div className="form-actions">
+            <button type="button" className="button button--ghost" onClick={() => setEditing(false)}>
+              <X size={16} /> Cancel
+            </button>
+            <button className="button button--primary" disabled={updateWorkspace.isPending}>
+              {updateWorkspace.isPending && <LoaderCircle className="spin" size={18} />}
+              Save changes
+            </button>
+          </div>
+        </form>
+      )}
 
       <section className="panel">
         <div className="panel__header">
@@ -171,6 +267,37 @@ export function WorkspaceSettingsPage() {
               >
                 <Copy size={16} /> Copy
               </button>
+            </div>
+          )}
+          {(invitations.data?.length ?? 0) > 0 && (
+            <div className="member-list">
+              {(invitations.data ?? []).map((pending) => (
+                <div className="member-row" key={pending.id}>
+                  <span className="avatar"><MailPlus size={16} /></span>
+                  <div className="member-row__identity">
+                    <strong>{pending.email}</strong>
+                    <span>
+                      Invited by {pending.invitedBy.name} · expires{' '}
+                      {new Date(pending.expiresAt).toLocaleDateString()}
+                    </span>
+                  </div>
+                  <div className="member-row__actions">
+                    <span className="role-badge">{pending.role.toLowerCase()}</span>
+                    <button
+                      className="icon-button"
+                      onClick={() => {
+                        if (window.confirm(`Cancel the invitation for ${pending.email}?`)) {
+                          cancelInvitation.mutate(pending.id);
+                        }
+                      }}
+                      aria-label={`Cancel invitation for ${pending.email}`}
+                      disabled={cancelInvitation.isPending}
+                    >
+                      <Trash2 size={16} />
+                    </button>
+                  </div>
+                </div>
+              ))}
             </div>
           )}
         </section>

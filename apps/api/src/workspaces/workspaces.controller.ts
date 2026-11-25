@@ -8,6 +8,7 @@ import { AcceptInvitationDto } from './dto/accept-invitation.dto';
 import { CreateWorkspaceDto } from './dto/create-workspace.dto';
 import { InviteMemberDto } from './dto/invite-member.dto';
 import { UpdateMemberRoleDto } from './dto/update-member-role.dto';
+import { UpdateWorkspaceDto } from './dto/update-workspace.dto';
 import { WorkspacesService } from './workspaces.service';
 
 @ApiTags('workspaces')
@@ -33,6 +34,30 @@ export class WorkspacesController {
   @ApiOperation({ summary: 'Get workspace details and members' })
   get(@Param('workspaceId') workspaceId: string) {
     return this.workspaces.get(workspaceId);
+  }
+
+  @Patch(':workspaceId')
+  @WorkspaceRoles(Role.OWNER, Role.ADMIN)
+  @ApiOperation({ summary: 'Update workspace name, description, or slug' })
+  update(@Param('workspaceId') workspaceId: string, @Body() dto: UpdateWorkspaceDto) {
+    return this.workspaces.update(workspaceId, dto);
+  }
+
+  @Get(':workspaceId/invitations')
+  @WorkspaceRoles(Role.OWNER, Role.ADMIN)
+  @ApiOperation({ summary: 'List pending invitations for a workspace' })
+  listInvitations(@Param('workspaceId') workspaceId: string) {
+    return this.workspaces.listInvitations(workspaceId);
+  }
+
+  @Delete(':workspaceId/invitations/:invitationId')
+  @WorkspaceRoles(Role.OWNER, Role.ADMIN)
+  @ApiOperation({ summary: 'Cancel a pending invitation' })
+  cancelInvitation(
+    @Param('workspaceId') workspaceId: string,
+    @Param('invitationId') invitationId: string,
+  ) {
+    return this.workspaces.cancelInvitation(workspaceId, invitationId);
   }
 
   @Post(':workspaceId/invitations')

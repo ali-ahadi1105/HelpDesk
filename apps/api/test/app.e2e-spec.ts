@@ -286,6 +286,162 @@ describe('TaskFlow API (e2e)', () => {
       .expect(403);
   });
 
+  it('lets owners and admins list and cancel pending invitations', async () => {
+    const session = await register({
+      name: owner.name,
+      email: `invite-manage-owner-${suffix}@taskflow.local`,
+      password: owner.password,
+    });
+    const memberSession = await register({
+      name: outsider.name,
+      email: `invite-manage-member-${suffix}@taskflow.local`,
+      password: owner.password,
+    });
+
+    const workspace = await request(app.getHttpServer())
+      .post('/workspaces')
+      .set('Authorization', `Bearer ${session.accessToken}`)
+      .send({ name: 'E2E Invite Management Workspace' })
+      .expect(201);
+    const workspaceId = workspace.body.id as string;
+
+    const invitation = await request(app.getHttpServer())
+      .post(`/workspaces/${workspaceId}/invitations`)
+      .set('Authorization', `Bearer ${session.accessToken}`)
+      .send({ email: `pending-${suffix}@taskflow.local`, role: 'VIEWER' })
+      .expect(201);
+
+    // Users without a membership cannot list invitations.
+    await request(app.getHttpServer())
+      .get(`/workspaces/${workspaceId}/invitations`)
+      .set('Authorization', `Bearer ${memberSession.accessToken}`)
+      .expect(403);
+
+    // Join as a plain MEMBER; the role is still not allowed to manage invites.
+    const memberInvite = await request(app.getHttpServer())
+      .post(`/workspaces/${workspaceId}/invitations`)
+      .set('Authorization', `Bearer ${session.accessToken}`)
+      .send({ email: `invite-manage-member-${suffix}@taskflow.local`, role: 'MEMBER' })
+      .expect(201);
+    await request(app.getHttpServer())
+      .post('/workspaces/invitations/accept')
+      .set('Authorization', `Bearer ${memberSession.accessToken}`)
+      .send({ token: memberInvite.body.token })
+      .expect(201);
+    await request(app.getHttpServer())
+      .get(`/workspaces/${workspaceId}/invitations`)
+      .set('Authorization', `Bearer ${memberSession.accessToken}`)
+      .expect(403);
+    await request(app.getHttpServer())
+      .delete(`/workspaces/${workspaceId}/invitations/${invitation.body.id}`)
+      .set('Authorization', `Bearer ${memberSession.accessToken}`)
+      .expect(403);
+
+    const pending = await request(app.getHttpServer())
+      .get(`/workspaces/${workspaceId}/invitations`)
+      .set('Authorization', `Bearer ${session.accessToken}`)
+      .expect(200);
+    expect(pending.body).toHaveLength(1);
+    expect(pending.body[0].email).toBe(`pending-${suffix}@taskflow.local`);
+    // The listing must never leak the acceptance token.
+    expect(pending.body[0].token).toBeUndefined();
+
+    // Cancelling marks the invitation consumed: it disappears from the
+    // pending list and can no longer be accepted.
+    await request(app.getHttpServer())
+      .delete(`/workspaces/${workspaceId}/invitations/${invitation.body.id}`)
+      .set('Authorization', `Bearer ${session.accessToken}`)
+      .expect(200);
+
+    const afterCancel = await request(app.getHttpServer())
+      .get(`/workspaces/${workspaceId}/invitations`)
+      .set('Authorization', `Bearer ${session.accessToken}`)
+      .expect(200);
+    expect(afterCancel.body).toHaveLength(0);
+
+    const inviteeSession = await register({
+      name: 'E2E Cancelled Invitee',
+      email: `pending-${suffix}@taskflow.local`,
+      password: owner.password,
+    });
+    await request(app.getHttpServer())
+      .post('/workspaces/invitations/accept')
+      .set('Authorization', `Bearer ${inviteeSession.accessToken}`)
+      .send({ token: invitation.body.token })
+      .expect(404);
+
+    // A replayed cancel is a 404.
+    await request(app.getHttpServer())
+      .delete(`/workspaces/${workspaceId}/invitations/${invitation.body.id}`)
+      .set('Authorization', `Bearer ${session.accessToken}`)
+      .expect(404);
+  });
+
+  it('lets owners and admins rename a workspace and rejects taken slugs', async () => {
+    const session = await register({
+      name: owner.name,
+      email: `workspace-update-owner-${suffix}@taskflow.local`,
+      password: owner.password,
+    });
+    const otherSession = await register({
+      name: outsider.name,
+      email: `workspace-update-outsider-${suffix}@taskflow.local`,
+      password: outsider.password,
+    });
+
+    const workspace = await request(app.getHttpServer())
+      .post('/workspaces')
+      .set('Authorization', `Bearer ${session.accessToken}`)
+      .send({ name: 'E2E Rename Workspace', slug: `rename-${suffix}` })
+      .expect(201);
+    const workspaceId = workspace.body.id as string;
+
+    const other = await request(app.getHttpServer())
+      .post('/workspaces')
+      .set('Authorization', `Bearer ${otherSession.accessToken}`)
+      .send({ name: 'Other Workspace', slug: `other-${suffix}` })
+      .expect(201);
+
+    // Outsiders cannot rename the workspace.
+    await request(app.getHttpServer())
+      .patch(`/workspaces/${workspaceId}`)
+      .set('Authorization', `Bearer ${otherSession.accessToken}`)
+      .send({ name: 'Hijacked' })
+      .expect(403);
+
+    // A slug owned by another workspace is rejected.
+    await request(app.getHttpServer())
+      .patch(`/workspaces/${workspaceId}`)
+      .set('Authorization', `Bearer ${session.accessToken}`)
+      .send({ slug: `other-${suffix}` })
+      .expect(409);
+
+    const updated = await request(app.getHttpServer())
+      .patch(`/workspaces/${workspaceId}`)
+      .set('Authorization', `Bearer ${session.accessToken}`)
+      .send({ name: 'Renamed Workspace', description: 'Updated description' })
+      .expect(200);
+    expect(updated.body.name).toBe('Renamed Workspace');
+    expect(updated.body.description).toBe('Updated description');
+    expect(updated.body.slug).toBe(`rename-${suffix}`);
+
+    const fetched = await request(app.getHttpServer())
+      .get(`/workspaces/${workspaceId}`)
+      .set('Authorization', `Bearer ${session.accessToken}`)
+      .expect(200);
+    expect(fetched.body.name).toBe('Renamed Workspace');
+
+    // Updating a workspace the user is not a member of is rejected before
+    // the service ever looks the workspace up.
+    await request(app.getHttpServer())
+      .patch('/workspaces/00000000-0000-4000-8000-000000000000')
+      .set('Authorization', `Bearer ${session.accessToken}`)
+      .send({ name: 'Ghost' })
+      .expect(403);
+
+    expect(other.body.id).not.toBe(workspaceId);
+  });
+
   it('creates a board and manages tasks within the workspace', async () => {
     const session = await register({
       name: owner.name,
